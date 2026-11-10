@@ -30,7 +30,7 @@ npm run preview
 - **Three.js**: 3D graphics engine for particle rendering
 - **MediaPipe Tasks Vision**: Real-time hand tracking and gesture recognition
 - **Vite**: Build tool and dev server
-- **Tailwind CSS**: Styling (loaded via CDN in index.html)
+- **CSS**: Styling in `style.css`
 
 ### Project Structure
 
@@ -91,7 +91,7 @@ No API key is required to run the project.
 - **Path Alias**: `@/` maps to project root (configured in both vite.config.ts and tsconfig.json)
 - **Dev Server**: Runs on port 3000, accessible on local network (host: 0.0.0.0)
 - **TypeScript**: Uses ESNext modules with React JSX transform
-- **MediaPipe Assets**: Loaded from CDN (https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision)
+- **MediaPipe Assets**: The model is served from `public/mediapipe`; matching versioned WASM files are copied from the npm package by the dev/build scripts.
 
 ## Common Modifications
 

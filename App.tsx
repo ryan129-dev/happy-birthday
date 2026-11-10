@@ -1,9 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
+/// <reference types="vite/client" />
+import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import Webcam from 'react-webcam';
-import { HandLandmarker, FilesetResolver, DrawingUtils } from "@mediapipe/tasks-vision";
-import ParticleSystem from './components/ParticleSystem';
+import type { HandLandmarker } from '@mediapipe/tasks-vision';
+import './style.css';
+
+declare const __VISION_VERSION__: string;
+
+const Scene = lazy(() => import('./components/Scene'));
 import { HandState, GestureType } from './types';
 
 // Detect if mobile device
@@ -23,63 +26,89 @@ const App: React.FC = () => {
     openness: 1.0,
     position: { x: 0, y: 0 }
   });
-  const [loading, setLoading] = useState(true);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [modelStatus, setModelStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [retryCount, setRetryCount] = useState(0);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const handLandmarkerRef = useRef<HandLandmarker | null>(null);
 
-  // Initialize MediaPipe
+  // Start the camera independently while the hand-tracking resources load.
   useEffect(() => {
+    let cancelled = false;
+    let landmarker: HandLandmarker | null = null;
+    const controller = new AbortController();
+    setModelStatus('loading');
+
     const initMediaPipe = async () => {
       try {
-        const vision = await FilesetResolver.forVisionTasks(
-          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
-        );
-        handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
-            delegate: "GPU"
-          },
-          runningMode: "VIDEO",
-          numHands: 1
+        const visionModule = import('@mediapipe/tasks-vision');
+        const model = fetch(
+          `${import.meta.env.BASE_URL}mediapipe/hand_landmarker-v1.task`,
+          { signal: controller.signal }
+        ).then(response => {
+          if (!response.ok) throw new Error(`Model download failed: ${response.status}`);
+          return response.arrayBuffer();
         });
-        setLoading(false);
+        const [{ HandLandmarker, FilesetResolver }, modelBuffer] = await Promise.all([visionModule, model]);
+        const vision = await FilesetResolver.forVisionTasks(`${import.meta.env.BASE_URL}mediapipe/wasm-${__VISION_VERSION__}`);
+        if (cancelled) return;
+        const createLandmarker = (delegate: 'GPU' | 'CPU') => HandLandmarker.createFromOptions(vision, {
+          baseOptions: { modelAssetBuffer: new Uint8Array(modelBuffer), delegate },
+          runningMode: 'VIDEO',
+          numHands: 1,
+        });
+        try {
+          landmarker = await createLandmarker('GPU');
+        } catch (error) {
+          if (cancelled) return;
+          console.warn('GPU hand tracking unavailable, trying CPU:', error);
+          landmarker = await createLandmarker('CPU');
+        }
+        if (cancelled) {
+          landmarker.close();
+          return;
+        }
+        handLandmarkerRef.current = landmarker;
+        setModelStatus('ready');
       } catch (error) {
-        console.error("Error loading MediaPipe:", error);
+        if (!cancelled) {
+          console.error('Error loading hand tracking:', error);
+          setModelStatus('error');
+        }
       }
     };
-    initMediaPipe();
-  }, []);
+    void initMediaPipe();
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (handLandmarkerRef.current === landmarker) handLandmarkerRef.current = null;
+      landmarker?.close();
+    };
+  }, [retryCount]);
 
-  // Detection Loop
   useEffect(() => {
+    if (modelStatus !== 'ready' || !cameraReady) return;
     let animationFrameId: number;
-
+    let lastVideoTime = -1;
     const detect = () => {
-      if (
-        handLandmarkerRef.current &&
-        webcamRef.current &&
-        webcamRef.current.video &&
-        webcamRef.current.video.readyState === 4
-      ) {
-        const video = webcamRef.current.video;
-        const startTimeMs = performance.now();
-        const results = handLandmarkerRef.current.detectForVideo(video, startTimeMs);
-
-        if (results.landmarks && results.landmarks.length > 0) {
-          const landmarks = results.landmarks[0];
-          analyzeGesture(landmarks);
-        } else {
-          // No hand detected, drift to neutral
-          setHandState(prev => ({ ...prev, gesture: GestureType.NONE }));
+      const video = webcamRef.current?.video;
+      if (handLandmarkerRef.current && video && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+        lastVideoTime = video.currentTime;
+        try {
+          const results = handLandmarkerRef.current.detectForVideo(video, performance.now());
+          if (results.landmarks?.length) analyzeGesture(results.landmarks[0]);
+          else setHandState(prev => prev.gesture === GestureType.NONE ? prev : { ...prev, gesture: GestureType.NONE });
+        } catch (error) {
+          console.error('Hand tracking failed:', error);
+          setModelStatus('error');
+          return;
         }
       }
       animationFrameId = requestAnimationFrame(detect);
     };
-
     detect();
-
     return () => cancelAnimationFrame(animationFrameId);
-  }, [loading]);
+  }, [modelStatus, cameraReady]);
 
   const analyzeGesture = (landmarks: any[]) => {
     // MediaPipe Hand Landmarks:
@@ -151,50 +180,30 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="relative w-full h-screen bg-black text-white overflow-hidden">
-      {/* 3D Scene */}
-      <div className="absolute inset-0 z-10">
-        <Canvas camera={{
-          position: [0, 0, isMobile ? 50 : 30],
-          fov: isMobile ? 60 : 45
-        }}>
-          <color attach="background" args={['#050505']} />
-          <ambientLight intensity={0.5} />
-          <pointLight position={[10, 10, 10]} />
-          <ParticleSystem handState={handState} isMobile={isMobile} />
-          <OrbitControls enableZoom={false} enablePan={false} />
-        </Canvas>
+    <div className="app">
+      <div className="scene">
+        <Suspense fallback={null}>
+          <Scene handState={handState} isMobile={isMobile} />
+        </Suspense>
       </div>
 
-      {/* UI Overlay */}
-      <div className={`absolute z-20 bg-black/50 backdrop-blur-md border border-white/10 rounded-xl ${
-        isMobile
-          ? 'top-2 left-2 right-2 p-3'
-          : 'top-4 left-4 p-4'
-      }`}>
-        <h1 className={`font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400 ${
-          isMobile ? 'text-base' : 'text-xl'
-        }`}>
-          Particle Gestures
-        </h1>
-        <div className={`mt-2 text-gray-300 ${isMobile ? 'text-xs space-y-0.5' : 'text-sm space-y-1'}`}>
-          <p>👆 1 Finger: <span className="text-white font-bold">生</span></p>
-          <p>✌️ 2 Fingers: <span className="text-white font-bold">日</span></p>
-          <p>🤟 3 Fingers: <span className="text-white font-bold">快</span></p>
-          <p>🖖 4 Fingers: <span className="text-white font-bold">乐</span></p>
-          {!isMobile && <p>✊/🖐️ Open/Close: <span className="text-white font-bold">Expand/Contract</span></p>}
+      <div className={`instructions ${isMobile ? 'mobile' : ''}`}>
+        <h1>Particle Gestures</h1>
+        <div className="gesture-list">
+          <p>👆 1 Finger: <strong>生</strong></p>
+          <p>✌️ 2 Fingers: <strong>日</strong></p>
+          <p>🤟 3 Fingers: <strong>快</strong></p>
+          <p>🖖 4 Fingers: <strong>乐</strong></p>
+          {!isMobile && <p>✊/🖐️ Open/Close: <strong>Expand/Contract</strong></p>}
         </div>
-        <div className={`mt-2 font-mono text-gray-400 ${isMobile ? 'text-xs' : 'text-xs'}`}>
-          Current: {handState.gesture !== GestureType.NONE ? `State ${handState.gesture}` : "Free Mode"}
+        <div className="status" role="status">
+          {modelStatus === 'loading' && '手势识别加载中…'}
+          {modelStatus === 'ready' && `Current: ${handState.gesture !== GestureType.NONE ? `State ${handState.gesture}` : 'Free Mode'}`}
+          {modelStatus === 'error' && <span>手势识别加载失败 <button className="retry" onClick={() => setRetryCount(count => count + 1)}>重试</button></span>}
         </div>
       </div>
 
-      {/* Webcam preview */}
-      <div className={`absolute z-20 rounded-lg overflow-hidden border-2 border-white/20 ${
-        isMobile
-          ? 'bottom-2 right-2 w-32'
-          : 'bottom-4 right-4 w-48'
-      }`}>
+      <div className={`camera ${isMobile ? 'mobile' : ''}`}>
         <Webcam
           ref={webcamRef}
           audio={false}
@@ -202,19 +211,12 @@ const App: React.FC = () => {
           height={isMobile ? 96 : 144}
           screenshotFormat="image/jpeg"
           videoConstraints={videoConstraints}
+          onUserMedia={() => { setCameraReady(true); setCameraError(null); }}
           onUserMediaError={handleUserMediaError}
-          className="w-full h-auto transform -scale-x-100"
+          className="camera-video"
         />
-        {loading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/80">
-            <span className={`text-white ${isMobile ? 'text-xs' : 'text-xs'}`}>Loading...</span>
-          </div>
-        )}
-        {cameraError && (
-          <div className="absolute inset-0 flex items-center justify-center bg-red-900/80 p-2">
-            <span className="text-white text-xs text-center">{cameraError}</span>
-          </div>
-        )}
+        {!cameraReady && !cameraError && <div className="camera-message">正在打开摄像头…</div>}
+        {cameraError && <div className="camera-message camera-error">{cameraError}</div>}
       </div>
     </div>
   );

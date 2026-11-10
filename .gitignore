@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Generated from the installed MediaPipe package by the dev/build scripts
+public/mediapipe/wasm*/
+public/mediapipe/hand_landmarker-v1.task

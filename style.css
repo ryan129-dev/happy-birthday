@@ -1,0 +1,18 @@
+.app { position: relative; width: 100%; height: 100vh; overflow: hidden; color: white; background: #000; }
+.scene { position: absolute; inset: 0; z-index: 10; }
+.instructions { position: absolute; z-index: 20; top: 1rem; left: 1rem; padding: 1rem; background: rgb(0 0 0 / 50%); backdrop-filter: blur(12px); border: 1px solid rgb(255 255 255 / 10%); border-radius: .75rem; }
+.instructions.mobile { top: .5rem; left: .5rem; right: .5rem; padding: .75rem; }
+.instructions h1 { margin: 0; font-size: 1.25rem; font-weight: 700; color: transparent; background: linear-gradient(to right, #60a5fa, #c084fc); background-clip: text; }
+.instructions.mobile h1 { font-size: 1rem; }
+.gesture-list { margin-top: .5rem; color: #d1d5db; font-size: .875rem; }
+.gesture-list p { margin: .25rem 0; }
+.gesture-list strong { color: white; }
+.instructions.mobile .gesture-list { font-size: .75rem; }
+.instructions.mobile .gesture-list p { margin: .125rem 0; }
+.status { margin-top: .5rem; color: #9ca3af; font: .75rem monospace; }
+.retry { padding: 0; color: #93c5fd; text-decoration: underline; cursor: pointer; background: none; border: 0; font: inherit; }
+.camera { position: absolute; z-index: 20; right: 1rem; bottom: 1rem; width: 12rem; overflow: hidden; border: 2px solid rgb(255 255 255 / 20%); border-radius: .5rem; }
+.camera.mobile { right: .5rem; bottom: .5rem; width: 8rem; }
+.camera-video { display: block; width: 100%; height: auto; transform: scaleX(-1); }
+.camera-message { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: .5rem; background: rgb(0 0 0 / 80%); color: white; font-size: .75rem; text-align: center; }
+.camera-error { background: rgb(127 29 29 / 80%); }

@@ -15,7 +15,7 @@
 
 没有匹配手势时，粒子呈球形；拇指与食指的距离会影响球体大小，手的位置会带来轻微旋转。手势识别受光线、遮挡和设备性能影响。
 
-摄像头画面用于浏览器内的手势识别；项目代码不会上传视频。首次使用需要联网加载 MediaPipe 模型和其他外部资源。摄像头需要 HTTPS 或 localhost，并需要浏览器授权。
+摄像头画面用于浏览器内的手势识别；项目代码不会上传视频。首次使用需要下载本站托管的 MediaPipe 手势模型及识别资源；识别程序在后台加载时，摄像头画面会先显示。资源会被浏览器缓存。摄像头需要 HTTPS 或 localhost，并需要浏览器授权。
 
 ## 本地运行
 
@@ -26,7 +26,7 @@ npm ci
 npm run dev
 ```
 
-打开终端显示的本地地址，授权摄像头。项目不需要 Gemini API key。
+打开终端显示的本地地址，授权摄像头。项目不需要 Gemini API key。首次运行开发或构建命令时，脚本会下载并校验 Google 的手势模型。
 
 ```bash
 npm run build    # 生成 dist/
@@ -44,3 +44,5 @@ npm run preview  # 本地预览生产构建
 ## 许可证
 
 [MIT License](LICENSE)。
+
+手势模型来自 [Google MediaPipe Hand Landmarker](https://developers.google.com/edge/mediapipe/solutions/vision/hand_landmarker#models)，采用 Apache 2.0 许可；来源和许可信息见 [第三方声明](third-party/README.md)。
