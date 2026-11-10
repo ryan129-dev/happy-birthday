@@ -3,6 +3,7 @@ import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import Webcam from 'react-webcam';
 import type { HandLandmarker } from '@mediapipe/tasks-vision';
 import './style.css';
+import { preloadResource } from './utils/preload';
 
 declare const __VISION_VERSION__: string;
 
@@ -38,10 +39,21 @@ const App: React.FC = () => {
     let landmarker: HandLandmarker | null = null;
     const controller = new AbortController();
     setModelStatus('loading');
+    performance.clearMarks('hand-tracking-start');
+    performance.clearMarks('hand-tracking-ready');
+    performance.clearMeasures('hand-tracking-init');
+    performance.mark('hand-tracking-start');
 
     const initMediaPipe = async () => {
       try {
-        const visionModule = import('@mediapipe/tasks-vision');
+        const visionModule = import('@mediapipe/tasks-vision').then(async module => {
+          const vision = await module.FilesetResolver.forVisionTasks(`${import.meta.env.BASE_URL}mediapipe/wasm-${__VISION_VERSION__}`);
+          if (!cancelled) {
+            preloadResource(vision.wasmLoaderPath, 'script');
+            preloadResource(vision.wasmBinaryPath, 'fetch');
+          }
+          return { HandLandmarker: module.HandLandmarker, vision };
+        });
         const model = fetch(
           `${import.meta.env.BASE_URL}mediapipe/hand_landmarker-v1.task`,
           { signal: controller.signal }
@@ -49,8 +61,7 @@ const App: React.FC = () => {
           if (!response.ok) throw new Error(`Model download failed: ${response.status}`);
           return response.arrayBuffer();
         });
-        const [{ HandLandmarker, FilesetResolver }, modelBuffer] = await Promise.all([visionModule, model]);
-        const vision = await FilesetResolver.forVisionTasks(`${import.meta.env.BASE_URL}mediapipe/wasm-${__VISION_VERSION__}`);
+        const [{ HandLandmarker, vision }, modelBuffer] = await Promise.all([visionModule, model]);
         if (cancelled) return;
         const createLandmarker = (delegate: 'GPU' | 'CPU') => HandLandmarker.createFromOptions(vision, {
           baseOptions: { modelAssetBuffer: new Uint8Array(modelBuffer), delegate },
@@ -69,9 +80,13 @@ const App: React.FC = () => {
           return;
         }
         handLandmarkerRef.current = landmarker;
+        performance.mark('hand-tracking-ready');
+        performance.measure('hand-tracking-init', 'hand-tracking-start', 'hand-tracking-ready');
         setModelStatus('ready');
       } catch (error) {
         if (!cancelled) {
+          cancelled = true;
+          controller.abort();
           console.error('Error loading hand tracking:', error);
           setModelStatus('error');
         }
@@ -90,12 +105,18 @@ const App: React.FC = () => {
     if (modelStatus !== 'ready' || !cameraReady) return;
     let animationFrameId: number;
     let lastVideoTime = -1;
+    let firstInference = true;
     const detect = () => {
       const video = webcamRef.current?.video;
       if (handLandmarkerRef.current && video && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
         lastVideoTime = video.currentTime;
         try {
           const results = handLandmarkerRef.current.detectForVideo(video, performance.now());
+          if (firstInference) {
+            firstInference = false;
+            performance.clearMeasures('hand-tracking-first-inference');
+            performance.measure('hand-tracking-first-inference', 'hand-tracking-start');
+          }
           if (results.landmarks?.length) analyzeGesture(results.landmarks[0]);
           else setHandState(prev => prev.gesture === GestureType.NONE ? prev : { ...prev, gesture: GestureType.NONE });
         } catch (error) {
